@@ -17,7 +17,7 @@ from scipy.interpolate import griddata
 #---------------------------
 recordformat= 'mseed'
 coordfile = 'example.txt'
-smax = 0.3
+smax = 0.2
 fmin, fmax = 0.01, 9
 tmin = UTCDateTime("2004-12-26T01:7:10.5")
 tmax = tmin+60*2
@@ -86,7 +86,7 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
     # Slowness increment
     sinc = 2*nbeam
     
-    # Shange max slowness amplitude
+    # Change max slowness amplitude
     smaxnew = smax/(np.sin(np.radians(45)))
     
     # Make grid from slowness and backazimuth
@@ -101,21 +101,25 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
     fk = np.zeros((len(backazimVector), len(slownessVector)))
     theta = np.zeros((len(backazimVector), len(slownessVector)))
     r = np.zeros((len(backazimVector), len(slownessVector)))
+    arrayResponse = np.zeros((len(backazimVector), len(slownessVector)))
     for ii in range(len(backazimVector)):
         for jj in range(len(slownessVector)):
-            # change to cartesian (minus degree because clockwise)
+            # change to cartesian
             slow_x = slownessVector[jj]*np.sin(np.radians(backazimVector[ii]))
             slow_y = slownessVector[jj]*np.cos(np.radians(backazimVector[ii]))
-            func = 0
+            func, arrFunc = 0, 0
             for kk in range(len(x)):
-                dt = slow_x * x[kk] + slow_y * y[kk]
-                func += (np.exp(-1j * 2 * np.pi * dt * freqs))*(fft_st[kk])**2
+                dt = np.vdot([slow_x,slow_y],[x[kk],y[kk]])
+                arf = (np.exp(-1j * 2 * np.pi * dt * freqs))
+                func += arf * fft_st[kk]
+                arrFunc += arf
+            arrayResponse[ii, jj] = np.sum(abs(arrFunc)/nbeam)                
             fk[ii, jj] = np.sum(abs(func)/nbeam)
             theta[ii, jj] = backazimVector[ii]
             r[ii, jj] = slownessVector[jj]
     
     # Average power for all signal
-    tracepower = np.sum(np.sum(abs(fft_st**2), axis=1))/nbeam
+    tracepower = np.sum(np.sum(abs(fft_st), axis=1))/nbeam
     
     # Relative power in dB
     fk = 10*np.log10(fk/tracepower)
@@ -143,10 +147,27 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
     backazimuth = np.degrees(np.arctan2(SxInt_max, SyInt_max))
     if backazimuth < 0:
         backazimuth += 360.
-    
-    # Plot in Cartesian
+        
+    # Plot array Response
     fig = plt.figure(figsize=(10, 8), tight_layout = True)
     fig.add_axes()
+    plt.contourf(Sx, Sy, 10*np.log10(arrayResponse/arrayResponse.max()),
+                 levels=np.arange(-10,0.05,0.1), cmap=plt.cm.jet)
+    plt.grid('on', color='lightgray',linestyle='--')
+    plt.xlabel('Sx (s/km)')
+    plt.ylabel('Sy (s/km)')
+    plt.colorbar(ticks=np.arange(-10,0.1,1), label = 'Relative Power (dB)')
+    plt.clim(-10,0)
+    plt.xlim(-smax, smax);
+    plt.ylim(-smax, smax);  
+    plt.title('FK Analysis, Array Response')
+    plt.show()
+    fig.savefig('F-K Analysis_Array Response.png',
+                    bbox_inches="tight",dpi=fig.dpi)
+    
+    # Plot in Cartesian
+    fig1 = plt.figure(figsize=(10, 8), tight_layout = True)
+    fig1.add_axes()
     plt.contourf(Sx, Sy, fk, cmap=plt.cm.jet,levels=np.arange(-10,0.05,0.1))
     plt.grid('on', color='lightgray',linestyle='--')
     plt.xlabel('Sx (s/km)')
@@ -157,8 +178,9 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
     plt.ylim(-smax, smax);  
     plt.title("FK Analysis, slowness= " + '%.4f' % slowness + " s/km,  backazimuth= " + '%.1f' % backazimuth + " deg")
     plt.show()
-    fig.savefig('F-K Analysis_cartesian.png',
-                    bbox_inches="tight",dpi=fig.dpi)
+    fig1.savefig('F-K Analysis_cartesian.png',
+                    bbox_inches="tight",dpi=fig1.dpi)
+    
     # Plot in polar
     fig2, ax = plt.subplots(figsize=(10,8),tight_layout=True, subplot_kw=dict(projection='polar'))
     plt.rc('grid', color='lightgray', linestyle='--')
@@ -174,12 +196,12 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
     for i in ax.get_yticks():
         if i < smax:
             r_label.append(str(i)+' s/km')
-            ax.annotate(str(i),
+            ax.annotate(str(i), fontsize=8,
                     xy=(np.radians(90),i), xycoords='data',
                     horizontalalignment='center',
                     verticalalignment='top'
                     )
-    ax.annotate('Slowness (s/km)',
+    ax.annotate('Slowness (s/km)', fontsize=12,
             xy=(np.radians(87.5),smax/2), xycoords='data',
             xytext=(0, 0.01), textcoords='offset points',
             horizontalalignment='center',
@@ -192,12 +214,11 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
     cb.set_clim(-10,0)
     cb.ax.set_title('Relative Power (dB)')
     fig2.savefig('F-K Analysis_polar.png',
-                    bbox_inches="tight",dpi=fig.dpi)
+                    bbox_inches="tight",dpi=fig2.dpi)
+    
     return
 
 def main():
     f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax)
 if __name__ == "__main__":
   main()
-
-    
