@@ -17,10 +17,11 @@ from scipy.interpolate import griddata
 #---------------------------
 recordformat= 'mseed'
 coordfile = 'example.txt'
-smax = 0.2
-fmin, fmax = 0.01, 9
+smax = 0.16
+fmin, fmax = 0.01, 10
 tmin = UTCDateTime("2004-12-26T01:7:10.5")
 tmax = tmin+60*2
+power = 'linear' #log or linear
 # --------------------------
 
 # Import record files
@@ -51,7 +52,7 @@ def coordinates(filename):
                  float(CoorPoint[3])])
     return LocDict
     
-def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
+def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax, power = 'linear'):
     LocDict = coordinates(coordfile)
     st = stream('', recordformat)
     # Apply coordinate to stream
@@ -111,19 +112,19 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
             for kk in range(len(x)):
                 dt = np.vdot([slow_x,slow_y],[x[kk],y[kk]])
                 arf = (np.exp(-1j * 2 * np.pi * dt * freqs))
-                func += arf * fft_st[kk]
-                arrFunc += arf
-            arrayResponse[ii, jj] = np.sum(abs(arrFunc)/nbeam)                
-            fk[ii, jj] = np.sum(abs(func)/nbeam)
+                func += arf * fft_st[kk]/nbeam
+                arrFunc += arf/nbeam
+            arrayResponse[ii, jj] = np.sum(abs(arrFunc)**2)                
+            fk[ii, jj] = np.sum(abs(func)**2)
             theta[ii, jj] = backazimVector[ii]
             r[ii, jj] = slownessVector[jj]
     
     # Average power for all signal
-    tracepower = np.sum(np.sum(abs(fft_st), axis=1))/nbeam
+    tracepower = np.sum(np.sum(abs(fft_st)**2, axis=1))
     
-    # Relative power in dB
-    fk = 10*np.log10(fk/tracepower)
-    
+    # Relative power
+    fk = (nbeam*fk/tracepower)
+    arrayResponse = (arrayResponse/arrayResponse.max())
     # convert to cartesian
     Sx = r*np.sin(np.radians(theta))
     Sy = r*np.cos(np.radians(theta))
@@ -147,17 +148,33 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
     backazimuth = np.degrees(np.arctan2(SxInt_max, SyInt_max))
     if backazimuth < 0:
         backazimuth += 360.
+    
+    if power == 'log':
+        #dB
+        levels = np.arange(-10,0.005,0.1)
+        ticks = np.arange(-10,0.05,1)
+        crange = (-10,0)
+        fk, arrayResponse = 10*np.log10(fk), 10*np.log10(arrayResponse)
+        idf, idr = np.where(fk<-10), np.where(arrayResponse<-10)
+        fk[idf], arrayResponse[idr] = -10, -10
+    elif power == 'linear' :
+        #linear
+        levels = np.arange(0,1.005,0.01)
+        ticks = np.arange(0,1.05,0.1)
+        crange = (0,1)
+        fk, arrayResponse = fk, arrayResponse
         
     # Plot array Response
     fig = plt.figure(figsize=(10, 8), tight_layout = True)
     fig.add_axes()
-    plt.contourf(Sx, Sy, 10*np.log10(arrayResponse/arrayResponse.max()),
-                 levels=np.arange(-10,0.05,0.1), cmap=plt.cm.jet)
+    plt.contourf(Sx, Sy, arrayResponse, 
+                 levels = levels, 
+                 cmap=plt.cm.jet)
     plt.grid('on', color='lightgray',linestyle='--')
     plt.xlabel('Sx (s/km)')
     plt.ylabel('Sy (s/km)')
-    plt.colorbar(ticks=np.arange(-10,0.1,1), label = 'Relative Power (dB)')
-    plt.clim(-10,0)
+    plt.colorbar(ticks = ticks, label = 'Relative Power')
+    plt.clim(crange)
     plt.xlim(-smax, smax);
     plt.ylim(-smax, smax);  
     plt.title('FK Analysis, Array Response')
@@ -168,12 +185,14 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
     # Plot in Cartesian
     fig1 = plt.figure(figsize=(10, 8), tight_layout = True)
     fig1.add_axes()
-    plt.contourf(Sx, Sy, fk, cmap=plt.cm.jet,levels=np.arange(-10,0.05,0.1))
+    plt.contourf(Sx, Sy, fk,
+                 levels = levels,
+                 cmap=plt.cm.jet)
     plt.grid('on', color='lightgray',linestyle='--')
     plt.xlabel('Sx (s/km)')
     plt.ylabel('Sy (s/km)')
-    plt.colorbar(ticks=np.arange(-10,0.1,1), label = 'Relative Power (dB)')
-    plt.clim(-10,0)
+    plt.colorbar(ticks=ticks, label = 'Relative Power')
+    plt.clim(crange)
     plt.xlim(-smax, smax);
     plt.ylim(-smax, smax);  
     plt.title("FK Analysis, slowness= " + '%.4f' % slowness + " s/km,  backazimuth= " + '%.1f' % backazimuth + " deg")
@@ -189,29 +208,31 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
     ax.set_theta_direction(-1)
     plt.ylim(ymax= smax)
     cax = ax.contourf(np.radians(theta), r, fk,
-                      cmap=plt.cm.jet,
-                      levels=np.arange(-10,0.05,0.1))
-    r_label = []
+                      levels = levels,
+                      cmap = plt.cm.jet)
+    
     ax.set_yticklabels([])
     for i in ax.get_yticks():
-        if i < smax:
-            r_label.append(str(i)+' s/km')
-            ax.annotate(str(i), fontsize=8,
+        if i < smax and i>0:
+            ax.annotate('{:}'.format(i), fontsize=8,
                     xy=(np.radians(90),i), xycoords='data',
                     horizontalalignment='center',
-                    verticalalignment='top'
+                    verticalalignment='top',
+                    bbox=dict(boxstyle="square,pad=.1", fc="w", ec="none", alpha=0.75)
                     )
     ax.annotate('Slowness (s/km)', fontsize=12,
             xy=(np.radians(87.5),smax/2), xycoords='data',
             xytext=(0, 0.01), textcoords='offset points',
             horizontalalignment='center',
-            verticalalignment='botto'
+            verticalalignment='bottom',
+            bbox=dict(boxstyle="square,pad=.2", fc="w", ec="none", alpha=0.75)
             )
     plt.title("FK Analysis, slowness= " + '%.4f' % slowness + " s/km,  backazimuth= " + '%.1f' % backazimuth + " deg")
-    cb = fig2.colorbar(cax,ticks=np.arange(-10,0.1,1), pad=0.1, extend='both',
+    cb = fig2.colorbar(cax,ticks=ticks, pad=0.1, extend='both',
                       shrink=0.5, orientation='horizontal') 
-    cb.ax.invert_xaxis()
-    cb.set_clim(-10,0)
+    if power == 'log':
+        cb.ax.invert_xaxis()
+    cb.set_clim(crange)
     cb.ax.set_title('Relative Power (dB)')
     fig2.savefig('F-K Analysis_polar.png',
                     bbox_inches="tight",dpi=fig2.dpi)
@@ -219,6 +240,6 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax):
     return
 
 def main():
-    f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax)
+    f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax, power)
 if __name__ == "__main__":
   main()
