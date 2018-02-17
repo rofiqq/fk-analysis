@@ -221,7 +221,7 @@ def f_k(recordformat, coordfile, smax, fmin, fmax, tmin, tmax, power = 'linear')
                     bbox=dict(boxstyle="square,pad=.1", fc="w", ec="none", alpha=0.75)
                     )
     ax.annotate('Slowness (s/km)', fontsize=12,
-            xy=(np.radians(87.5),smax/2), xycoords='data',
+            xy=(np.radians(87.5),smax/2.0), xycoords='data',
             xytext=(0, 0.01), textcoords='offset points',
             horizontalalignment='center',
             verticalalignment='bottom',
